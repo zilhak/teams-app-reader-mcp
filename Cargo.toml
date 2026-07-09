@@ -1,0 +1,15 @@
+[package]
+name = "teams-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "macOS 접근성 API로 실행 중인 Microsoft Teams 데스크톱 앱을 읽는 읽기 전용 MCP 서버"
+
+[dependencies]
+rmcp = { version = "2.2", features = ["server", "transport-io", "macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+anyhow = "1"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"

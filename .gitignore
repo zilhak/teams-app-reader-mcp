@@ -1,0 +1,15 @@
+# Rust build
+/target/
+**/*.rs.bk
+
+# Claude 작업 임시 파일 (git 미추적)
+.claude-workspace/
+
+# macOS
+.DS_Store
+
+# 민감 데이터 — 실수로라도 Teams 로컬 캐시/추출물이 커밋되지 않도록
+*.ldb
+*.leveldb/
+snapshot/
+*.indexeddb*
