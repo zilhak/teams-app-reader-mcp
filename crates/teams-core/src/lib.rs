@@ -4,5 +4,9 @@
 pub mod idb;
 pub mod leveldb;
 pub mod location;
+pub mod teams;
+pub mod util;
 pub mod v8;
 pub mod varint;
+
+pub use teams::{Chat, Message, StoreError, TeamsStore};
