@@ -3,7 +3,17 @@ name = "teams-mcp-http"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+description = "Teams 읽기 전용 MCP 서버 — Streamable HTTP 전송 (localhost 바인드)"
 
 [[bin]]
 name = "teams-mcp-http"
 path = "src/main.rs"
+
+[dependencies]
+teams-mcp-server = { workspace = true }
+rmcp = { workspace = true, features = ["transport-streamable-http-server"] }
+tokio = { workspace = true, features = ["net"] }
+axum = "0.8"
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = "0.3"
