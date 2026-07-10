@@ -33,6 +33,8 @@ pub struct SearchArgs {
 #[derive(Clone)]
 pub struct TeamsServer {
     store: Arc<TeamsStore>,
+    // tool_handler 매크로가 내부적으로 참조하는 필드 (직접 읽는 코드는 없음)
+    #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 
