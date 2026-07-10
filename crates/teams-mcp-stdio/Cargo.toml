@@ -1,0 +1,9 @@
+[package]
+name = "teams-mcp-stdio"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "teams-mcp-stdio"
+path = "src/main.rs"

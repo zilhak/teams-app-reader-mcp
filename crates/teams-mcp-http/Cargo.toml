@@ -1,0 +1,9 @@
+[package]
+name = "teams-mcp-http"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "teams-mcp-http"
+path = "src/main.rs"

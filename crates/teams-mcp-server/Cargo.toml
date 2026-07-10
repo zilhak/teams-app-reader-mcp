@@ -1,0 +1,8 @@
+[package]
+name = "teams-mcp-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+teams-core = { workspace = true }
