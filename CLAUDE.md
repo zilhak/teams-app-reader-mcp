@@ -38,10 +38,18 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 - **큰 작업을 여러 단계로 나눴으면, 각 단계마다 커밋.** (예: M1 끝 → 커밋, M2 끝 → 커밋.)
 - **push는 Agent가 하지 않는다.** 사용자가 명시적으로 "push 해"라고 지시했을 때만, 또는 사용자가 직접 push 한다. Agent는 로컬 커밋까지만.
 
+## 구조 (Cargo 워크스페이스)
+
+- `crates/teams-core` — LevelDB 리더 + V8 디코더 + Teams 스키마 + 조회 API (transport/MCP 무관).
+- `crates/teams-mcp-server` — rmcp `TeamsServer`(도구 정의). 전송 무관.
+- `crates/teams-mcp-stdio` / `teams-mcp-http` — stdio / Streamable HTTP 전송 바이너리.
+
+메시지 store 매핑: 대화=`db31/store1`(OneGQL_Conversation), 메시지=`db44/store1`(replychain `messageMap`).
+DB 구조를 다시 조사해야 하면 `cargo run -p teams-core --example explore`(집계) / `--example dump -- <db> <store>`(레코드 덤프) 사용.
+
 ## 빌드
 
 ```bash
-cargo build --release   # 산출물: target/release/teams-mcp
+cargo build --release -p teams-mcp-stdio   # 산출물: target/release/teams-mcp-stdio
+cargo build --release -p teams-mcp-http    # 산출물: target/release/teams-mcp-http
 ```
-
-> 현재 `src/`는 초기 a11y 기반 스캐폴드(`ax.rs`, osascript)가 남아 있음. IndexedDB 리더로 교체 예정 (`docs/teams-storage-structure.md` 기준).
