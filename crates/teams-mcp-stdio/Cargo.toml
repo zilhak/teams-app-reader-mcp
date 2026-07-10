@@ -3,7 +3,14 @@ name = "teams-mcp-stdio"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+description = "Teams 읽기 전용 MCP 서버 — stdio 전송"
 
 [[bin]]
 name = "teams-mcp-stdio"
 path = "src/main.rs"
+
+[dependencies]
+teams-mcp-server = { workspace = true }
+rmcp = { workspace = true, features = ["transport-io"] }
+tokio = { workspace = true, features = ["io-std"] }
+anyhow = { workspace = true }

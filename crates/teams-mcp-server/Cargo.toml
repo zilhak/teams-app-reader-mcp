@@ -3,6 +3,12 @@ name = "teams-mcp-server"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+description = "Teams 읽기 전용 MCP 서버 핸들러 (rmcp). 전송(stdio/http) 무관."
 
 [dependencies]
 teams-core = { workspace = true }
+rmcp = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = "1"
