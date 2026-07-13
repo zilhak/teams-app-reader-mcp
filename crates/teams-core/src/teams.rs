@@ -33,6 +33,9 @@ pub struct Message {
     pub time_ms: i64,
     pub message_type: String,
     pub id: String,
+    /// 답장 메시지인 경우 인용 대상 메시지의 id (인용 본문은 content 에서 제거됨). 없으면 생략.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -249,6 +252,8 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
         .unwrap_or_default();
     let message_type = str_field(obj, "messageType").unwrap_or_default();
     let raw_content = str_field(obj, "content").unwrap_or_default();
+    // 답장 인용(blockquote) 제거 + 대상 id 추출
+    let (raw_content, reply_to) = strip_reply_quote(&raw_content);
     let content = if raw_content.contains('<') {
         html_to_text(&raw_content)
     } else {
@@ -268,7 +273,53 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
         time_ms,
         message_type,
         id,
+        reply_to,
     })
+}
+
+/// content HTML 에서 답장 인용(`<blockquote itemtype=".../Reply" itemid=ID>...`)을 통째로
+/// 제거하고 인용 대상 메시지 id 를 반환한다. 인용은 앞선 메시지의 중복 복제이므로 버린다.
+/// Reply 가 아닌 일반 blockquote 는 보존한다.
+fn strip_reply_quote(html: &str) -> (String, Option<String>) {
+    if !html.contains("<blockquote") {
+        return (html.to_string(), None);
+    }
+    let mut result = String::with_capacity(html.len());
+    let mut reply_to: Option<String> = None;
+    let mut rest = html;
+    loop {
+        let Some(pos) = rest.find("<blockquote") else {
+            result.push_str(rest);
+            break;
+        };
+        let Some(end_rel) = rest[pos..].find("</blockquote>") else {
+            result.push_str(rest);
+            break;
+        };
+        let end = pos + end_rel + "</blockquote>".len();
+        let block = &rest[pos..end];
+        result.push_str(&rest[..pos]); // blockquote 앞부분
+        if block.contains("schema.skype.com/Reply") {
+            if reply_to.is_none() {
+                reply_to = extract_attr(block, "itemid");
+            }
+            // 인용 블록은 버림
+        } else {
+            result.push_str(block); // 일반 blockquote 는 유지
+        }
+        rest = &rest[end..];
+    }
+    (result, reply_to)
+}
+
+/// 여는 태그(첫 `>` 이전)에서 `attr="value"` 의 value 를 추출.
+fn extract_attr(tag: &str, attr: &str) -> Option<String> {
+    let open_end = tag.find('>').unwrap_or(tag.len());
+    let opening = &tag[..open_end];
+    let needle = format!("{attr}=\"");
+    let start = opening.find(&needle)? + needle.len();
+    let val_end = opening[start..].find('"')?;
+    Some(opening[start..start + val_end].to_string())
 }
 
 /// db31 대화 레코드에서 (conversationId, topic) 추출. OneGQL_Conversation 만.
