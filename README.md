@@ -1,6 +1,6 @@
 # teams-mcp
 
-macOS에서 **Microsoft Teams(신 Teams 2)** 가 로컬에 캐싱해둔 대화/메시지를 읽는 **읽기 전용** MCP 서버 (Rust).
+macOS·Windows에서 **Microsoft Teams(신 Teams 2)** 가 로컬에 캐싱해둔 대화/메시지를 읽는 **읽기 전용** MCP 서버 (Rust).
 
 Microsoft Graph API·봇·토큰·네트워크를 전혀 쓰지 않는다. Teams 앱이 자기 IndexedDB(로컬 LevelDB)에 이미 캐싱해둔 데이터를 파일에서 직접 읽을 뿐이라, 관리자 승인이나 앱 등록이 필요 없다.
 
@@ -76,6 +76,9 @@ TEAMS_MCP_HTTP_ADDR=127.0.0.1:9000 TEAMS_MCP_TOKEN=secret target/release/teams-m
 
 ## 환경변수
 
-- `TEAMS_MCP_DB` — IndexedDB leveldb 경로 override (기본: 표준 macOS Teams v2 경로).
+- `TEAMS_MCP_DB` — IndexedDB leveldb 경로 override. 미설정 시 OS별 표준 Teams v2 경로를 사용한다:
+  - macOS: `$HOME/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView/WV2Profile_tfw/IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb`
+  - Windows: `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\IndexedDB\https_teams.microsoft.com_0.indexeddb.leveldb`
+  - Linux 등 그 외: 신 Teams 2 네이티브 클라이언트가 없어 기본 경로가 없다. `TEAMS_MCP_DB` 로만 지정 가능.
 - `TEAMS_MCP_HTTP_ADDR` — HTTP 바인드 주소 (기본 `127.0.0.1:8787`).
 - `TEAMS_MCP_TOKEN` — 설정 시 HTTP `Authorization: Bearer <token>` 필수.
