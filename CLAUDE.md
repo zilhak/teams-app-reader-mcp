@@ -44,8 +44,10 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 - `crates/teams-mcp-server` — rmcp `TeamsServer`(도구 정의). 전송 무관.
 - `crates/teams-mcp-stdio` / `teams-mcp-http` — stdio / Streamable HTTP 전송 바이너리.
 
-메시지 store 매핑: 대화=`db31/store1`(OneGQL_Conversation), 메시지=`db44/store1`(replychain `messageMap`).
-DB 구조를 다시 조사해야 하면 `cargo run -p teams-core --example explore`(집계) / `--example dump -- <db> <store>`(레코드 덤프) 사용.
+메시지 store 매핑(**이름 기반 런타임 해석** — IndexedDB db/store id 는 프로파일마다 동적 할당이라 하드코딩 불가):
+대화=`conversation-manager` DB 의 `conversations` store(OneGQL_Conversation),
+메시지=`replychain-manager` DB 의 `replychains`/`replychains-2` store(replychain `messageMap`).
+DB 구조를 다시 조사해야 하면 `cargo run -p teams-core --example explore`(집계) / `--example dump -- <db> <store>`(레코드 덤프) / `--example meta`(db·store 이름↔id 매핑) 사용.
 
 ## 빌드
 

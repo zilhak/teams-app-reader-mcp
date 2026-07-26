@@ -1,8 +1,14 @@
 //! Teams 스키마 매핑 + 조회 API (`TeamsStore`).
 //!
-//! - 대화 목록: db31/store1 의 `OneGQL_Conversation` 레코드
+//! - 대화 목록: `conversation-manager` DB 의 `conversations` store 에 있는
+//!   `OneGQL_Conversation` 레코드
 //!   (`id`=conversationId, `threadProperties.topic` ?? `chatTitle.longTitle/shortTitle`)
-//! - 메시지: db44/store1 replychain 레코드의 `messageMap{ msgId -> 메시지객체 }`
+//! - 메시지: `replychain-manager` DB 의 `replychains`/`replychains-2` store 에 있는
+//!   replychain 레코드의 `messageMap{ msgId -> 메시지객체 }`
+//!
+//! IndexedDB 의 database/object-store id 는 프로파일마다 생성 순서대로 동적 할당되므로
+//! 숫자 id 를 하드코딩하면 다른 환경에서 안 맞는다. 여기서는 leveldb 메타데이터를 읽어
+//! **이름으로 id 를 런타임에 해석**한다.
 //!
 //! 값은 leveldb 전수 스캔 후 인메모리로 인덱싱하고, TTL 로 갱신한다.
 
@@ -14,15 +20,28 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::idb::KeyPrefix;
+use crate::idb::{self, KeyPrefix};
 use crate::leveldb;
 use crate::util::{format_epoch_ms, html_to_text};
 use crate::v8::V8Reader;
 
-const CONV_DB: u64 = 31;
-const CONV_STORE: u64 = 1;
-const MSG_DB: u64 = 44;
-const MSG_STORE: u64 = 1;
+/// 대화 DB 를 식별하는 database 이름 세그먼트(`Teams:conversation-manager:...`).
+const CONV_MANAGER: &str = "conversation-manager";
+/// 메시지 DB 를 식별하는 database 이름 세그먼트(`Teams:replychain-manager:...`).
+const MSG_MANAGER: &str = "replychain-manager";
+/// 대화 레코드가 담긴 object store 이름.
+const CONV_STORE_NAME: &str = "conversations";
+/// 메시지(replychain) 레코드가 담긴 object store 이름들.
+const MSG_STORE_NAMES: [&str; 2] = ["replychains", "replychains-2"];
+
+/// database 이름 목록에서 콜론 구분 세그먼트가 `manager` 와 정확히 일치하는 db id 를 찾는다.
+/// (예: `conversation-manager` 는 `conversation-folder-manager` 와 구분됨)
+fn find_db_by_manager(databases: &[(String, u64)], manager: &str) -> Option<u64> {
+    databases
+        .iter()
+        .find(|(name, _)| name.split(':').any(|seg| seg == manager))
+        .map(|(_, id)| *id)
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Message {
@@ -107,9 +126,40 @@ impl TeamsStore {
     fn build_cache(&self) -> Result<Cache, StoreError> {
         let records = leveldb::read_dir(&self.db_path)?;
 
+        // 1) 메타데이터에서 이름 → id 해석 (환경마다 id 가 다르므로 하드코딩 불가).
+        let mut databases: Vec<(String, u64)> = Vec::new();
+        let mut store_names: HashMap<(u64, u64), String> = HashMap::new();
+        for (key, value) in &records {
+            if let Some((name, id)) = idb::parse_database_name(key, value) {
+                databases.push((name, id));
+            } else if let Some((db, store, name)) = idb::parse_object_store_name(key, value) {
+                store_names.insert((db, store), name);
+            }
+        }
+
+        let conv_db = find_db_by_manager(&databases, CONV_MANAGER);
+        let msg_db = find_db_by_manager(&databases, MSG_MANAGER);
+
+        // 이름으로 대상 (db, store) 셀 확정.
+        let conv_cell: Option<(u64, u64)> = conv_db.and_then(|db| {
+            store_names
+                .iter()
+                .find(|((d, _), name)| *d == db && name.as_str() == CONV_STORE_NAME)
+                .map(|((d, s), _)| (*d, *s))
+        });
+        let msg_cells: Vec<(u64, u64)> = match msg_db {
+            Some(db) => store_names
+                .iter()
+                .filter(|((d, _), name)| *d == db && MSG_STORE_NAMES.contains(&name.as_str()))
+                .map(|((d, s), _)| (*d, *s))
+                .collect(),
+            None => Vec::new(),
+        };
+
         let mut messages_by_conv: HashMap<String, Vec<Message>> = HashMap::new();
         let mut topic_by_conv: HashMap<String, String> = HashMap::new();
 
+        // 2) object-store-data 레코드를 대상 셀에 한해 디코드.
         for (key, value) in &records {
             let Some(kp) = KeyPrefix::parse(key) else {
                 continue;
@@ -117,11 +167,12 @@ impl TeamsStore {
             if !kp.is_object_store_data() {
                 continue;
             }
-            if kp.database_id == MSG_DB && kp.object_store_id == MSG_STORE {
+            let cell = (kp.database_id, kp.object_store_id);
+            if msg_cells.contains(&cell) {
                 if let Some(v) = V8Reader::decode(value) {
                     collect_messages(&v, &mut messages_by_conv);
                 }
-            } else if kp.database_id == CONV_DB && kp.object_store_id == CONV_STORE {
+            } else if conv_cell == Some(cell) {
                 if let Some(v) = V8Reader::decode(value) {
                     if let Some((cid, topic)) = extract_topic(&v) {
                         topic_by_conv.insert(cid, topic);
@@ -322,7 +373,7 @@ fn extract_attr(tag: &str, attr: &str) -> Option<String> {
     Some(opening[start..start + val_end].to_string())
 }
 
-/// db31 대화 레코드에서 (conversationId, topic) 추출. OneGQL_Conversation 만.
+/// `conversations` store 레코드에서 (conversationId, topic) 추출. OneGQL_Conversation 만.
 fn extract_topic(v: &Value) -> Option<(String, String)> {
     let obj = v.as_object()?;
     let cid = str_field(obj, "id")?;
