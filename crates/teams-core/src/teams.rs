@@ -55,6 +55,20 @@ pub struct Message {
     /// 답장 메시지인 경우 인용 대상 메시지의 id (인용 본문은 content 에서 제거됨). 없으면 생략.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
+    /// 본문에 포함된 이미지(AMS) 참조. content 평문화 시 사라지므로 별도로 보존한다.
+    /// 실제 바이트는 원격이라 여기엔 URL·크기만 담고, 조회는 `fetch_image` 도구로 한다. 없으면 생략.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ImageRef>,
+}
+
+/// 메시지 본문의 AMS(Async Media Service) 이미지 참조. `url` 로 `fetch_image` 호출.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageRef {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -305,11 +319,17 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
     let raw_content = str_field(obj, "content").unwrap_or_default();
     // 답장 인용(blockquote) 제거 + 대상 id 추출
     let (raw_content, reply_to) = strip_reply_quote(&raw_content);
-    let content = if raw_content.contains('<') {
+    // 평문화 전에 이미지 참조를 뽑아 둔다 (html_to_text 가 <img> 를 통째로 버리기 때문).
+    let images = extract_images(&raw_content);
+    let mut content = if raw_content.contains('<') {
         html_to_text(&raw_content)
     } else {
         raw_content
     };
+    // 이미지만 있던 메시지는 평문이 비므로 마커를 남긴다 (검색·문맥 보존).
+    if content.is_empty() && !images.is_empty() {
+        content = "[이미지]".to_string();
+    }
     let time_ms = num_field(obj, "originalArrivalTime")
         .or_else(|| str_field(obj, "id").and_then(|s| s.parse::<i64>().ok()))
         .or_else(|| num_field(obj, "clientArrivalTime"))
@@ -325,7 +345,65 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
         message_type,
         id,
         reply_to,
+        images,
     })
+}
+
+/// content HTML 에서 AMS 이미지(`<img itemtype=".../AMSImage" src=... style="width:..;height:..">`)를
+/// 추출한다. 이모지 등 다른 인라인 이미지는 제외하고, 공유된 이미지/스크린샷(AMS)만 대상으로 한다.
+fn extract_images(html: &str) -> Vec<ImageRef> {
+    let mut out = Vec::new();
+    let mut rest = html;
+    while let Some(pos) = rest.find("<img") {
+        rest = &rest[pos..];
+        let tag_end = rest.find('>').map(|e| e + 1).unwrap_or(rest.len());
+        let tag = &rest[..tag_end];
+        rest = &rest[tag_end..];
+        // AMS 이미지만 (이모지/스티커 배제). itemtype 또는 src 로 판별.
+        let is_ams = tag.contains("schema.skype.com/AMSImage")
+            || extract_attr(tag, "src").is_some_and(|s| s.contains("asyncgw"));
+        if !is_ams {
+            continue;
+        }
+        let Some(url) = extract_attr(tag, "src").filter(|s| s.starts_with("http")) else {
+            continue;
+        };
+        let (width, height) = extract_img_dims(tag);
+        out.push(ImageRef { url, width, height });
+    }
+    out
+}
+
+/// `<img>` 여는 태그에서 크기를 추출. `style="width:NNNpx;height:NNNpx"` 우선, 없으면 width/height 속성.
+fn extract_img_dims(tag: &str) -> (Option<u32>, Option<u32>) {
+    let parse_px = |s: &str| -> Option<u32> {
+        s.trim()
+            .trim_end_matches("px")
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|f| f as u32)
+    };
+    if let Some(style) = extract_attr(tag, "style") {
+        let mut w = None;
+        let mut h = None;
+        for decl in style.split(';') {
+            if let Some((k, v)) = decl.split_once(':') {
+                match k.trim() {
+                    "width" => w = parse_px(v),
+                    "height" => h = parse_px(v),
+                    _ => {}
+                }
+            }
+        }
+        if w.is_some() || h.is_some() {
+            return (w, h);
+        }
+    }
+    (
+        extract_attr(tag, "width").and_then(|s| parse_px(&s)),
+        extract_attr(tag, "height").and_then(|s| parse_px(&s)),
+    )
 }
 
 /// content HTML 에서 답장 인용(`<blockquote itemtype=".../Reply" itemid=ID>...`)을 통째로
