@@ -8,6 +8,7 @@ use rmcp::{
     model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
+use base64::Engine;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use teams_core::TeamsStore;
@@ -28,6 +29,12 @@ pub struct SearchArgs {
     pub query: String,
     /// 반환할 최근 결과 수 (기본 20).
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FetchImageArgs {
+    /// read_messages 의 images[].url (AMS 이미지 URL, `*.asyncgw.teams.microsoft.com`).
+    pub url: String,
 }
 
 #[derive(Clone)]
@@ -60,7 +67,7 @@ impl TeamsServer {
     }
 
     #[tool(
-        description = "특정 Teams 대화의 캐시된 메시지를 시간 오름차순으로 반환한다. chat 은 conversationId 정확일치 또는 대화명 부분일치. 각 메시지: 발신자, 본문(HTML은 평문화), 시각(UTC), 메시지타입. 읽기 전용."
+        description = "특정 Teams 대화의 캐시된 메시지를 시간 오름차순으로 반환한다. chat 은 conversationId 정확일치 또는 대화명 부분일치. 각 메시지: 발신자, 본문(HTML은 평문화), 시각(UTC), 메시지타입. 이미지가 있으면 images[]{url,width,height} 로 함께 반환하며, 실제 이미지는 그 url 을 fetch_image 에 넘겨 조회한다. 읽기 전용."
     )]
     async fn read_messages(
         &self,
@@ -92,6 +99,22 @@ impl TeamsServer {
             .map_err(store_err)?;
         Ok(json_result(&msgs))
     }
+
+    #[tool(
+        description = "read_messages 의 images[].url 로 Teams 이미지(스크린샷 등)를 실제로 가져와 이미지로 반환한다. 로컬 Teams 쿠키를 복호화해 AMS CDN 에 인증 요청하므로, 다른 도구와 달리 네트워크를 사용한다. `*.asyncgw.teams.microsoft.com` URL 만 허용."
+    )]
+    async fn fetch_image(
+        &self,
+        Parameters(args): Parameters<FetchImageArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let (bytes, mime) =
+            tokio::task::spawn_blocking(move || teams_core::fetch_ams_image(&args.url))
+                .await
+                .map_err(join_err)?
+                .map_err(media_err)?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(CallToolResult::success(vec![ContentBlock::image(b64, mime)]))
+    }
 }
 
 #[tool_handler]
@@ -99,9 +122,11 @@ impl ServerHandler for TeamsServer {
     fn get_info(&self) -> ServerInfo {
         let mut info = ServerInfo::default();
         info.instructions = Some(
-            "Microsoft Teams(v2) 가 macOS 로컬 IndexedDB 에 캐싱해둔 대화/메시지를 읽는 \
+            "Microsoft Teams(v2) 가 로컬 IndexedDB 에 캐싱해둔 대화/메시지를 읽는 \
              읽기 전용 서버. 메시지 전송·수정 등 쓰기 기능은 제공하지 않는다. \
-             로컬 캐시에 이미 있는 범위만 읽으며(네트워크 접근 없음), Teams 앱이 캐싱한 \
+             list_chats·read_messages·search_messages 는 로컬 캐시만 읽어 네트워크를 쓰지 않는다. \
+             예외로 fetch_image 만, read_messages 의 images[].url 이미지를 실제로 받아오기 위해 \
+             로컬 Teams 쿠키를 복호화해 AMS CDN 에 인증 요청한다. Teams 앱이 캐싱한 \
              수개월치 히스토리를 조회할 수 있다."
                 .into(),
         );
@@ -125,5 +150,9 @@ fn join_err(e: tokio::task::JoinError) -> McpError {
 }
 
 fn store_err(e: teams_core::StoreError) -> McpError {
+    McpError::internal_error(e.to_string(), None)
+}
+
+fn media_err(e: teams_core::MediaError) -> McpError {
     McpError::internal_error(e.to_string(), None)
 }

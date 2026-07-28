@@ -10,6 +10,25 @@ snap = "1"
 thiserror = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+# fetch_image: 쿠키 DB 읽기 + AMS 이미지 GET (이 모듈만 네트워크 사용).
+rusqlite = { version = "0.32", features = ["bundled"] }
+ureq = "2"
+
+# 쿠키 복호화 (macOS): 키체인 키 → PBKDF2-SHA1 → AES-128-CBC.
+[target.'cfg(target_os = "macos")'.dependencies]
+hmac = "0.12"
+sha1 = "0.10"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+
+# 쿠키 복호화 (Windows): Local State DPAPI 키 → AES-256-GCM.
+[target.'cfg(target_os = "windows")'.dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+windows-sys = { version = "0.59", features = [
+    "Win32_Security_Cryptography",
+    "Win32_Foundation",
+] }
 
 [[example]]
 name = "explore"

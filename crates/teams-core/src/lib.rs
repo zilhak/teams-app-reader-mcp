@@ -4,9 +4,11 @@
 pub mod idb;
 pub mod leveldb;
 pub mod location;
+pub mod media;
 pub mod teams;
 pub mod util;
 pub mod v8;
 pub mod varint;
 
-pub use teams::{Chat, Message, StoreError, TeamsStore};
+pub use media::{fetch_ams_image, MediaError};
+pub use teams::{Chat, ImageRef, Message, StoreError, TeamsStore};
