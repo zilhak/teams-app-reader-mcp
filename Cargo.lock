@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "teams-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "teams-mcp-http"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "teams-mcp-server"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "rmcp",
@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "teams-mcp-stdio"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "rmcp",
