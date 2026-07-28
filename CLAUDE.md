@@ -6,8 +6,9 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 
 - 테넌트 관리자 동의(admin consent)를 받을 수 없는 환경이라 **정식 Microsoft Graph API 경로가 막힘.** 개인계정도 Teams 채팅 API 불가.
 - **macOS 접근성(a11y) 방식은 폐기됨** — Teams v2는 WebView2라 접근성 트리에 메시지 텍스트가 안 실리고, 강제로 켤 방법이 없음.
-- **확정 방식: Teams가 로컬 IndexedDB(LevelDB)에 캐싱해둔 메시지를 직접 읽는다.** 토큰·봇·앱등록·네트워크 전부 불필요. 순수 로컬 파일 읽기라 네트워크 요청이 전혀 없음.
-- **쓰기(전송)는 의도적으로 미지원.** 읽기 전용.
+- **확정 방식: Teams가 로컬 IndexedDB(LevelDB)에 캐싱해둔 메시지를 직접 읽는다.** 토큰·봇·앱등록 불필요. 메시지 조회는 순수 로컬 파일 읽기라 네트워크 요청이 전혀 없음.
+- **예외: `fetch_image` 만 네트워크 사용.** 이미지는 원격 AMS URL 참조라 로컬에 바이트가 없어, 로컬 쿠키를 복호화해 인증 GET 한다 (`docs/image-fetch.md`).
+- **쓰기(전송)는 의도적으로 미지원.** 읽기 전용 (이미지도 GET 만).
 
 전체 의사결정 과정과 시행착오는 `docs/journey-and-troubleshooting.md` 참고.
 
@@ -40,7 +41,7 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 
 ## 구조 (Cargo 워크스페이스)
 
-- `crates/teams-core` — LevelDB 리더 + V8 디코더 + Teams 스키마 + 조회 API (transport/MCP 무관).
+- `crates/teams-core` — LevelDB 리더 + V8 디코더 + Teams 스키마 + 조회 API (transport/MCP 무관). `media` 모듈만 예외로 네트워크 사용(이미지 조회 = 쿠키 복호화 + AMS GET, `docs/image-fetch.md`).
 - `crates/teams-mcp-server` — rmcp `TeamsServer`(도구 정의). 전송 무관.
 - `crates/teams-mcp-stdio` / `teams-mcp-http` — stdio / Streamable HTTP 전송 바이너리.
 

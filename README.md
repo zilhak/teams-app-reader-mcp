@@ -2,7 +2,7 @@
 
 macOS·Windows에서 **Microsoft Teams(신 Teams 2)** 가 로컬에 캐싱해둔 대화/메시지를 읽는 **읽기 전용** MCP 서버 (Rust).
 
-Microsoft Graph API·봇·토큰·네트워크를 전혀 쓰지 않는다. Teams 앱이 자기 IndexedDB(로컬 LevelDB)에 이미 캐싱해둔 데이터를 파일에서 직접 읽을 뿐이라, 관리자 승인이나 앱 등록이 필요 없다.
+Microsoft Graph API·봇·토큰·앱 등록을 쓰지 않는다. Teams 앱이 자기 IndexedDB(로컬 LevelDB)에 이미 캐싱해둔 데이터를 파일에서 직접 읽을 뿐이라, 관리자 승인이 필요 없다. 메시지 조회는 네트워크도 쓰지 않는다 — 단, 이미지 실물을 받아오는 `fetch_image` 만 예외로 로컬 쿠키를 복호화해 AMS CDN 에 인증 요청한다(아래 참조).
 
 ## 동작 원리
 
@@ -16,6 +16,7 @@ Microsoft Graph API·봇·토큰·네트워크를 전혀 쓰지 않는다. Teams
 ## 스코프
 
 - ✅ **로컬 캐시에 이미 있는 메시지 읽기** (Teams가 자동 캐싱한 수개월치, 채팅별 수백~1600건).
+- ✅ **메시지 이미지 참조 노출 + 실물 조회** (`read_messages` 의 `images[]` → `fetch_image`). 상세: `docs/image-fetch.md`.
 - ❌ 캐시에 없는 과거를 새로 수집하는 기능은 드롭됨 (`docs/scroll-collection/`).
 
 ## 구조 (Cargo 워크스페이스)
@@ -39,8 +40,9 @@ cargo build --release -p teams-mcp-http    # → target/release/teams-mcp-http
 | 도구 | 설명 |
 |---|---|
 | `list_chats` | 캐시된 대화 목록(대화명·conversationId·메시지 수·마지막 메시지)을 최근순으로 |
-| `read_messages` | 특정 대화의 메시지(`chat`=conversationId 정확일치 또는 대화명 부분일치, `limit`, `before_ms`) |
+| `read_messages` | 특정 대화의 메시지(`chat`=conversationId 정확일치 또는 대화명 부분일치, `limit`, `before_ms`). 이미지가 있으면 `images[]{url,width,height}` 포함 |
 | `search_messages` | 캐시 전역 키워드 검색(`query`, `limit`) |
+| `fetch_image` | `images[].url`(AMS 이미지)을 인증 쿠키로 GET 해 이미지로 반환. **유일하게 네트워크 사용** |
 
 ## 실행 · 등록
 
