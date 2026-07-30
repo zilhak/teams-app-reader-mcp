@@ -1,5 +1,9 @@
-//! Teams 읽기 전용 MCP 서버 핸들러. 전송(stdio/http)과 무관하게 `TeamsServer` 를
-//! 노출하고, stdio/http 바이너리가 각자 전송에 연결한다. 읽기 전용 — 전송/쓰기 도구 없음.
+//! Teams MCP 서버 핸들러. 전송(stdio/http)과 무관하게 `TeamsServer` 를 노출하고,
+//! stdio/http 바이너리가 각자 전송에 연결한다.
+//!
+//! Teams 데이터는 **읽기만** 한다 (메시지 전송·수정 도구 없음). 전송 대신,
+//! 사용자가 Teams 입력창에 붙여넣을 수 있는 형태로 클립보드에 올려주는
+//! `copy_to_clipboard` 까지를 지원한다.
 
 use std::sync::Arc;
 
@@ -35,6 +39,14 @@ pub struct SearchArgs {
 pub struct FetchImageArgs {
     /// read_messages 의 images[].url (AMS 이미지 URL, `*.asyncgw.teams.microsoft.com`).
     pub url: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CopyToClipboardArgs {
+    /// 클립보드에 올릴 HTML 조각. Teams 입력창에서 동작 확인된 태그는 문단 `<p>`,
+    /// 강조 `<strong>`, 불릿 `<ul><li>…</li></ul>`(중첩 가능), 링크
+    /// `<a href="URL">텍스트</a>`. `<html>`/`<body>` 로 감쌀 필요 없다 (자동으로 감싼다).
+    pub html: String,
 }
 
 #[derive(Clone)]
@@ -115,6 +127,22 @@ impl TeamsServer {
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         Ok(CallToolResult::success(vec![ContentBlock::image(b64, mime)]))
     }
+
+    #[tool(
+        description = "Teams 입력창에 붙여넣을 리치 텍스트를 시스템 클립보드에 올린다. 이 서버는 메시지를 전송하지 않는 대신 여기까지를 지원한다 — 사용자가 Teams 창에서 붙여넣기(Cmd+V / Ctrl+V)하면 링크·불릿·강조 서식이 살아있는 상태로 입력된다. 여러 줄 업무보고나 티켓 링크가 섞인 메시지를 만들 때 쓴다. 주의: 클립보드는 사용자의 전역 상태이고 기존 복사 내용을 덮어쓰므로, 사용자가 클립보드에 넣어달라고 명시적으로 요청했을 때만 호출한다."
+    )]
+    async fn copy_to_clipboard(
+        &self,
+        Parameters(args): Parameters<CopyToClipboardArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        tokio::task::spawn_blocking(move || teams_core::copy_html(&args.html))
+            .await
+            .map_err(join_err)?
+            .map_err(clipboard_err)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            "클립보드에 복사했다. Teams 입력창에서 붙여넣기(Cmd+V / Ctrl+V)하면 서식이 적용된다.",
+        )]))
+    }
 }
 
 #[tool_handler]
@@ -122,12 +150,14 @@ impl ServerHandler for TeamsServer {
     fn get_info(&self) -> ServerInfo {
         let mut info = ServerInfo::default();
         info.instructions = Some(
-            "Microsoft Teams(v2) 가 로컬 IndexedDB 에 캐싱해둔 대화/메시지를 읽는 \
-             읽기 전용 서버. 메시지 전송·수정 등 쓰기 기능은 제공하지 않는다. \
+            "Microsoft Teams(v2) 가 로컬 IndexedDB 에 캐싱해둔 대화/메시지를 읽는 서버. \
+             Teams 앱이 캐싱한 수개월치 히스토리를 조회할 수 있다. \
+             Teams 로 메시지를 전송·수정하는 기능은 제공하지 않는다 — 대신 사용자가 Teams \
+             입력창에 직접 붙여넣을 수 있도록 리치 텍스트를 클립보드에 올려주는 \
+             copy_to_clipboard 까지를 지원한다(서식·링크 유지). \
              list_chats·read_messages·search_messages 는 로컬 캐시만 읽어 네트워크를 쓰지 않는다. \
              예외로 fetch_image 만, read_messages 의 images[].url 이미지를 실제로 받아오기 위해 \
-             로컬 Teams 쿠키를 복호화해 AMS CDN 에 인증 요청한다. Teams 앱이 캐싱한 \
-             수개월치 히스토리를 조회할 수 있다."
+             로컬 Teams 쿠키를 복호화해 AMS CDN 에 인증 요청한다."
                 .into(),
         );
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -154,5 +184,9 @@ fn store_err(e: teams_core::StoreError) -> McpError {
 }
 
 fn media_err(e: teams_core::MediaError) -> McpError {
+    McpError::internal_error(e.to_string(), None)
+}
+
+fn clipboard_err(e: teams_core::ClipboardError) -> McpError {
     McpError::internal_error(e.to_string(), None)
 }

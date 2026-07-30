@@ -13,6 +13,8 @@ serde_json = { workspace = true }
 # fetch_image: 쿠키 DB 읽기 + AMS 이미지 GET (이 모듈만 네트워크 사용).
 rusqlite = { version = "0.32", features = ["bundled"] }
 ureq = "2"
+# clipboard: HTML flavor 복사. image-data 기본 feature 는 `image` 크레이트를 끌어오므로 끈다.
+arboard = { version = "3", default-features = false }
 
 # 쿠키 복호화 (macOS): 키체인 키 → PBKDF2-SHA1 → AES-128-CBC.
 [target.'cfg(target_os = "macos")'.dependencies]
