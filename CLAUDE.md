@@ -8,13 +8,15 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 - **macOS 접근성(a11y) 방식은 폐기됨** — Teams v2는 WebView2라 접근성 트리에 메시지 텍스트가 안 실리고, 강제로 켤 방법이 없음.
 - **확정 방식: Teams가 로컬 IndexedDB(LevelDB)에 캐싱해둔 메시지를 직접 읽는다.** 토큰·봇·앱등록 불필요. 메시지 조회는 순수 로컬 파일 읽기라 네트워크 요청이 전혀 없음.
 - **예외: `fetch_image` 만 네트워크 사용.** 이미지는 원격 AMS URL 참조라 로컬에 바이트가 없어, 로컬 쿠키를 복호화해 인증 GET 한다 (`docs/image-fetch.md`).
-- **쓰기(전송)는 의도적으로 미지원.** 읽기 전용 (이미지도 GET 만).
+- **Teams 로의 쓰기(전송·수정)는 의도적으로 미지원.** Teams 데이터는 읽기만 한다 (이미지도 GET 만).
+- **단, "클립보드에 복사"까지는 지원한다.** 전송을 못 하는 대신, 사용자가 Teams 입력창에 그대로 붙여넣을 수 있는 리치 텍스트(링크·불릿·강조 유지)를 클립보드에 올려준다(`copy_to_clipboard`). Teams 데이터에 대한 쓰기가 아니라 로컬 OS 클립보드 쓰기이므로 위 원칙과 충돌하지 않는다. 붙여넣기·전송이라는 최종 행위의 주체는 사용자다.
 
 전체 의사결정 과정과 시행착오는 `docs/journey-and-troubleshooting.md` 참고.
 
 ## 현재 스코프
 
 - ✅ **로컬 캐시에 이미 있는 메시지 읽기** (Teams가 자동으로 캐싱한 수천 건. 채팅별로 수개월치 히스토리).
+- ✅ **붙여넣기용 리치 텍스트 클립보드 복사** (`copy_to_clipboard`). 전송 미지원의 보완 경로.
 - ❌ **스크롤로 캐시에 없는 과거를 새로 수집하는 기능은 드롭됨.** (이유·계획·재개 방법은 `docs/scroll-collection/` 참고)
 
 ## docs/ 폴더 안내
@@ -41,7 +43,7 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 
 ## 구조 (Cargo 워크스페이스)
 
-- `crates/teams-core` — LevelDB 리더 + V8 디코더 + Teams 스키마 + 조회 API (transport/MCP 무관). `media` 모듈만 예외로 네트워크 사용(이미지 조회 = 쿠키 복호화 + AMS GET, `docs/image-fetch.md`).
+- `crates/teams-core` — LevelDB 리더 + V8 디코더 + Teams 스키마 + 조회 API (transport/MCP 무관). 조회는 순수 로컬 파일 읽기이고, 외부에 손을 뻗는 모듈은 둘뿐이다: `media`(네트워크 — 이미지 조회 = 쿠키 복호화 + AMS GET, `docs/image-fetch.md`), `clipboard`(OS 클립보드 — HTML+평문 flavor 동시 세팅, arboard).
 - `crates/teams-mcp-server` — rmcp `TeamsServer`(도구 정의). 전송 무관.
 - `crates/teams-mcp-stdio` / `teams-mcp-http` — stdio / Streamable HTTP 전송 바이너리.
 
