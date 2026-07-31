@@ -7,6 +7,7 @@
 //! - 쿠키 저장소: EBWebView 프로파일의 `Cookies`(SQLite). 값은 Chromium `os_crypt` 로 암호화됨.
 //! - macOS: 키체인 "Microsoft Teams Safe Storage" → PBKDF2(saltysalt,1003)-AES128-CBC.
 //! - Windows: `Local State` 의 DPAPI 마스터키 → AES256-GCM.
+//! - Linux: 고정 비밀번호 `peanuts`(v10) 또는 키링 비밀번호(v11) → PBKDF2(saltysalt,1)-AES128-CBC.
 //!
 //! 이 모듈만 네트워크를 쓴다 (나머지 서버는 순수 로컬 읽기). `fetch_image` 도구에서만 호출된다.
 
@@ -188,7 +189,7 @@ fn macos_safe_storage_key() -> Result<Vec<u8>, MediaError> {
 }
 
 /// PBKDF2-HMAC-SHA1. dkLen(16) ≤ 20 이라 1블록이지만 일반 루프로 둔다.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn pbkdf2_sha1(pw: &[u8], salt: &[u8], iters: u32, out: &mut [u8]) {
     use hmac::{Hmac, Mac};
     use sha1::Sha1;
@@ -309,10 +310,69 @@ fn dpapi_unprotect(data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+/// 리눅스 Chromium 은 키 출처가 두 가지다 — 키링이 없으면 고정 비밀번호 `peanuts`(`v10`),
+/// 있으면 키링에 넣어둔 비밀번호(`v11`). 어느 쪽인지, 그리고 어느 앱(Edge·Chrome·
+/// teams-for-linux…) 의 키인지는 미리 알 수 없으므로 **후보 키를 모두 만들어 두고
+/// 실제로 풀리는 것을 쓴다.** (macOS 는 1003 회지만 리눅스는 PBKDF2 반복이 1 회다.)
+#[cfg(target_os = "linux")]
+struct CookieCipher {
+    aes_keys: Vec<[u8; 16]>,
+}
+
+#[cfg(target_os = "linux")]
+impl CookieCipher {
+    fn load() -> Result<Self, MediaError> {
+        let mut passwords = vec![b"peanuts".to_vec()];
+        passwords.extend(linux_keyring_passwords());
+        let aes_keys = passwords
+            .iter()
+            .map(|pw| {
+                let mut key = [0u8; 16];
+                pbkdf2_sha1(pw, b"saltysalt", 1, &mut key);
+                key
+            })
+            .collect();
+        Ok(Self { aes_keys })
+    }
+
+    fn decrypt(&self, enc: &[u8]) -> Option<String> {
+        use cbc::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+        let ct = enc
+            .strip_prefix(b"v10")
+            .or_else(|| enc.strip_prefix(b"v11"))?;
+        let iv = [0x20u8; 16];
+        self.aes_keys.iter().find_map(|key| {
+            let pt = cbc::Decryptor::<aes::Aes128>::new(key.into(), &iv.into())
+                .decrypt_padded_vec_mut::<Pkcs7>(ct)
+                .ok()?;
+            plaintext_to_value(&pt)
+        })
+    }
+}
+
+/// Secret Service(키링)에 저장된 Chromium os_crypt 비밀번호들을 `secret-tool` 로 읽는다.
+/// macOS 가 `security` CLI 를 쓰는 것과 같은 방식 — D-Bus 의존성을 끌어오지 않는다.
+/// `secret-tool` 이 없거나(헤드리스 등) 항목이 없으면 그냥 빈 목록이고, 그 경우 `peanuts`
+/// 키만으로 시도한다.
+#[cfg(target_os = "linux")]
+fn linux_keyring_passwords() -> Vec<Vec<u8>> {
+    // Chromium 계열이 키링 항목에 붙이는 `application` 속성값들.
+    const APPS: [&str; 4] = ["teams-for-linux", "microsoft-edge", "chrome", "chromium"];
+    APPS.iter()
+        .filter_map(|app| {
+            let out = std::process::Command::new("secret-tool")
+                .args(["lookup", "application", app])
+                .output()
+                .ok()?;
+            (out.status.success() && !out.stdout.is_empty()).then_some(out.stdout)
+        })
+        .collect()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 struct CookieCipher;
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 impl CookieCipher {
     fn load() -> Result<Self, MediaError> {
         Err(MediaError::Key("지원하지 않는 플랫폼".into()))

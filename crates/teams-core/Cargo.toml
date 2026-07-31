@@ -16,8 +16,9 @@ ureq = "2"
 # clipboard: HTML flavor 복사. image-data 기본 feature 는 `image` 크레이트를 끌어오므로 끈다.
 arboard = { version = "3", default-features = false }
 
-# 쿠키 복호화 (macOS): 키체인 키 → PBKDF2-SHA1 → AES-128-CBC.
-[target.'cfg(target_os = "macos")'.dependencies]
+# 쿠키 복호화 (macOS·Linux): 키체인/키링 키 → PBKDF2-SHA1 → AES-128-CBC.
+# (반복 횟수만 다르다: macOS 1003, Linux 1.)
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 hmac = "0.12"
 sha1 = "0.10"
 aes = "0.8"
