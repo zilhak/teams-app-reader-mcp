@@ -14,8 +14,9 @@ const DB_TAIL: &str = "IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb";
 ///
 /// - macOS: `$HOME/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/` + 꼬리
 /// - Windows: `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\` + 꼬리
-/// - 그 외(Linux 등): 신 Teams 2 네이티브 클라이언트가 없어 로컬 캐시 자체가 없음 → `None`
-///   (`TEAMS_MCP_DB` 로만 지정 가능).
+/// - Linux: 네이티브 Teams 2 가 없어 Chromium 계열 껍데기(PWA·teams-for-linux)를 쓴다 →
+///   후보 프로파일들을 훑어 DB 가 실제로 있는 것을 고른다 (`linux_profile_candidates`).
+/// - 그 외: `None` (`TEAMS_MCP_DB` 로만 지정 가능).
 pub fn default_db_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("TEAMS_MCP_DB") {
         return Some(PathBuf::from(p));
@@ -72,7 +73,103 @@ fn platform_profile_root() -> Option<PathBuf> {
     Some(p)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+/// 리눅스에는 신 Teams 2 네이티브 클라이언트가 없다. 대신 같은 웹 Teams 를 감싼 Chromium
+/// 계열 껍데기 두 종류로 쓴다 — 공식 PWA(Edge·Chrome·Chromium)와 비공식 teams-for-linux
+/// (Electron). 껍데기가 무엇이든 저장 포맷은 동일한 IndexedDB(LevelDB)라 리더는 그대로
+/// 통하고, 다른 것은 프로파일 경로뿐이다. 그래서 후보를 훑어 **DB 가 실제로 존재하는**
+/// 프로파일을 고른다.
+#[cfg(target_os = "linux")]
+fn platform_profile_root() -> Option<PathBuf> {
+    linux_profile_candidates()
+        .into_iter()
+        .find(|p| p.join(DB_TAIL).exists())
+}
+
+/// 리눅스 프로파일 후보. `<config 루트>/<앱>` 아래에서
+/// 앱 디렉터리 자신(Electron 기본 세션) · 직속 하위(브라우저 `Default`·`Profile N`) ·
+/// `Partitions/*`(Electron 파티션) 를 모은다.
+#[cfg(target_os = "linux")]
+fn linux_profile_candidates() -> Vec<PathBuf> {
+    // (config 하위 앱 디렉터리 이름, snap 이름, flatpak app id)
+    const APPS: [(&str, &str, &str); 4] = [
+        (
+            "teams-for-linux",
+            "teams-for-linux",
+            "com.github.IsmaelMartinez.teams_for_linux",
+        ),
+        ("microsoft-edge", "microsoft-edge", "com.microsoft.Edge"),
+        ("google-chrome", "google-chrome", "com.google.Chrome"),
+        ("chromium", "chromium", "org.chromium.Chromium"),
+    ];
+
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Vec::new();
+    };
+    let xdg_config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+
+    let mut out = Vec::new();
+    for (app, snap, flatpak) in APPS {
+        // deb/tarball · snap · flatpak 은 config 루트만 다르고 그 아래 구조는 같다.
+        for app_dir in [
+            xdg_config.join(app),
+            home.join("snap").join(snap).join("current/.config").join(app),
+            home.join(".var/app").join(flatpak).join("config").join(app),
+        ] {
+            push_subdirs(&app_dir.join("Partitions"), &mut out);
+            push_subdirs(&app_dir, &mut out);
+            out.push(app_dir);
+        }
+    }
+    out
+}
+
+/// `dir` 의 직속 하위 디렉터리를 이름순(결정적)으로 `out` 에 넣는다.
+#[cfg(target_os = "linux")]
+fn push_subdirs(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut subdirs: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+        .collect();
+    subdirs.sort();
+    out.extend(subdirs);
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn platform_profile_root() -> Option<PathBuf> {
     None
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    /// 후보 중 **DB 가 실제로 있는** 프로파일만 골라내는지. (여러 Chromium 앱·프로파일이
+    /// 깔려 있어도 Teams DB 를 가진 하나를 찾아야 한다.)
+    #[test]
+    fn linux_picks_profile_that_actually_has_the_db() {
+        let home = std::env::temp_dir().join("teams-mcp-loc-test");
+        let _ = std::fs::remove_dir_all(&home);
+
+        // Teams DB 가 없는 미끼: Edge 의 두 프로파일.
+        for p in ["Default", "Profile 1"] {
+            std::fs::create_dir_all(home.join(".config/microsoft-edge").join(p)).unwrap();
+        }
+        // 진짜: teams-for-linux 의 Electron 파티션.
+        let real = home.join(".config/teams-for-linux/Partitions/teams-4-linux");
+        std::fs::create_dir_all(real.join(DB_TAIL)).unwrap();
+
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("XDG_CONFIG_HOME");
+        std::env::remove_var("TEAMS_MCP_DB");
+
+        assert_eq!(default_db_path(), Some(real.join(DB_TAIL)));
+
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 }
