@@ -1,6 +1,6 @@
 # teams-mcp
 
-macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)** 의 로컬 데이터를 읽는 **읽기 전용 MCP 서버** (Rust).
+macOS·Windows·Linux에서 실행 중인 **Microsoft Teams** 의 로컬 데이터를 읽는 **읽기 전용 MCP 서버** (Rust). macOS·Windows 는 네이티브 Teams 2(Edge WebView2), Linux 는 네이티브 클라이언트가 없어 Teams PWA(Edge·Chrome) 또는 teams-for-linux(Electron) — 어느 쪽이든 Chromium 계열이라 저장 포맷이 같아 같은 리더로 읽는다.
 
 ## 왜 이 방식인가 (요약)
 
@@ -30,10 +30,11 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 
 ## 기술 핵심 (빠른 참조)
 
-- 대상 프로세스: `MSTeams` (bundle id `com.microsoft.teams2`).
-- 데이터 위치: `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView/WV2Profile_tfw/IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb/`
+- 대상 프로세스: macOS·Windows `MSTeams` (bundle id `com.microsoft.teams2`) / Linux 는 Edge·Chrome(PWA) 또는 `teams-for-linux`.
+- 데이터 위치 (macOS): `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView/WV2Profile_tfw/IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb/`
+- 데이터 위치 (Linux): 고정 경로가 없어 **후보를 훑어 DB 가 실제로 있는 프로파일을 고른다**(`location.rs` 의 `linux_profile_candidates`). teams-for-linux 는 `~/.config/teams-for-linux/Partitions/teams-4-linux`, PWA 는 `~/.config/{microsoft-edge,google-chrome,chromium}/{Default,Profile N}`, snap·flatpak 설치도 같은 구조로 탐색. 플랫폼 무관하게 `TEAMS_MCP_DB` 로 override 가능.
 - 값 인코딩: 표준 **V8 ValueSerializer** (Teams 커스텀 아님). blink 봉투만 스킵하면 파싱됨.
-- **권한**: 이 서버(및 초기 osascript/CGEvent를 쓰는 프로세스)에 macOS "손쉬운 사용(Accessibility)" 권한 필요. TCC는 실행파일 경로/서명 단위로 권한을 구분하므로, **실제로 띄우는 그 바이너리/앱**에 부여해야 함.
+- **권한**: 이 서버(및 초기 osascript/CGEvent를 쓰는 프로세스)에 macOS "손쉬운 사용(Accessibility)" 권한 필요. TCC는 실행파일 경로/서명 단위로 권한을 구분하므로, **실제로 띄우는 그 바이너리/앱**에 부여해야 함. (Linux 는 별도 권한 없음 — 해당 파일 읽기 권한이면 충분.)
 
 ## Git 커밋 규칙 (Agent 필수 준수)
 
@@ -43,7 +44,7 @@ macOS에서 실행 중인 **Microsoft Teams(신 Teams 2, Edge WebView2 기반)**
 
 ## 구조 (Cargo 워크스페이스)
 
-- `crates/teams-core` — LevelDB 리더 + V8 디코더 + Teams 스키마 + 조회 API (transport/MCP 무관). 조회는 순수 로컬 파일 읽기이고, 외부에 손을 뻗는 모듈은 둘뿐이다: `media`(네트워크 — 이미지 조회 = 쿠키 복호화 + AMS GET, `docs/image-fetch.md`), `clipboard`(OS 클립보드 — HTML+평문 flavor 동시 세팅, arboard).
+- `crates/teams-core` — LevelDB 리더 + V8 디코더 + Teams 스키마 + 조회 API (transport/MCP 무관). 조회는 순수 로컬 파일 읽기이고, 외부에 손을 뻗는 모듈은 둘뿐이다: `media`(네트워크 — 이미지 조회 = 쿠키 복호화 + AMS GET, `docs/image-fetch.md`), `clipboard`(OS 클립보드 — HTML+평문 flavor 동시 세팅, arboard). 플랫폼 분기도 이 둘과 `location` 뿐이다 — `media` 는 쿠키 복호화 방식(macOS 키체인 / Windows DPAPI / Linux `peanuts`·키링), `clipboard` 는 리눅스에서만 인스턴스를 프로세스 수명 동안 살려둔다(X11·Wayland 는 소유 프로세스가 내용을 내어주는 구조라 드롭하면 사라짐).
 - `crates/teams-mcp-server` — rmcp `TeamsServer`(도구 정의). 전송 무관.
 - `crates/teams-mcp-stdio` / `teams-mcp-http` — stdio / Streamable HTTP 전송 바이너리.
 
