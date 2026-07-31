@@ -16,6 +16,13 @@ ureq = "2"
 # clipboard: HTML flavor 복사. image-data 기본 feature 는 `image` 크레이트를 끌어오므로 끈다.
 arboard = { version = "3", default-features = false }
 
+# 리눅스 클립보드: 기본 X11 백엔드에 더해 Wayland 네이티브 경로도 켠다
+# (Ubuntu 기본 세션이 Wayland — XWayland 경유가 아니라 직접 붙는다).
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3", default-features = false, features = [
+    "wayland-data-control",
+] }
+
 # 쿠키 복호화 (macOS·Linux): 키체인/키링 키 → PBKDF2-SHA1 → AES-128-CBC.
 # (반복 횟수만 다르다: macOS 1003, Linux 1.)
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
