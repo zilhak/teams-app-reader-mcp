@@ -32,6 +32,7 @@ macOS·Windows·Linux에서 실행 중인 **Microsoft Teams** 의 로컬 데이�
 
 - 대상 프로세스: macOS·Windows `MSTeams` (bundle id `com.microsoft.teams2`) / Linux 는 Edge·Chrome(PWA) 또는 `teams-for-linux`.
 - 데이터 위치 (macOS): `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView/WV2Profile_tfw/IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb/`
+- 오리진 디렉터리는 고정이 아니다 — MS 가 `teams.microsoft.com` → `teams.cloud.microsoft` 로 이전 중이라 한 프로파일에 둘이 공존할 수 있다(한쪽은 stale). `location.rs` 의 `ORIGIN_DIRS` 후보 중 **최근에 쓰인 것**을 고른다(플랫폼 공통).
 - 데이터 위치 (Linux): 고정 경로가 없어 **후보를 훑어 DB 가 실제로 있는 프로파일을 고른다**(`location.rs` 의 `linux_profile_candidates`). teams-for-linux 는 `~/.config/teams-for-linux/Partitions/teams-4-linux`, PWA 는 `~/.config/{microsoft-edge,google-chrome,chromium}/{Default,Profile N}`, snap·flatpak 설치도 같은 구조로 탐색. 플랫폼 무관하게 `TEAMS_MCP_DB` 로 override 가능.
 - 값 인코딩: 표준 **V8 ValueSerializer** (Teams 커스텀 아님). blink 봉투만 스킵하면 파싱됨.
 - **권한**: 이 서버(및 초기 osascript/CGEvent를 쓰는 프로세스)에 macOS "손쉬운 사용(Accessibility)" 권한 필요. TCC는 실행파일 경로/서명 단위로 권한을 구분하므로, **실제로 띄우는 그 바이너리/앱**에 부여해야 함. (Linux 는 별도 권한 없음 — 해당 파일 읽기 권한이면 충분.)

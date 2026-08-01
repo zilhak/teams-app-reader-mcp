@@ -112,12 +112,13 @@ TEAMS_MCP_HTTP_ADDR=127.0.0.1:9000 TEAMS_MCP_TOKEN=secret target/release/teams-m
 ## 환경변수
 
 - `TEAMS_MCP_DB` — IndexedDB leveldb 경로 override. 미설정 시 OS별 표준 Teams v2 경로를 사용한다:
-  - macOS: `$HOME/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView/WV2Profile_tfw/IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb`
-  - Windows: `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\IndexedDB\https_teams.microsoft.com_0.indexeddb.leveldb`
-  - Linux: 아래 후보 중 Teams DB가 실제로 있는 프로파일을 자동 선택 (`<프로파일>/IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb`)
+  - macOS: `$HOME/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView/WV2Profile_tfw/IndexedDB/<오리진>`
+  - Windows: `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\IndexedDB\<오리진>`
+  - Linux: 아래 후보 중 Teams DB가 실제로 있는 프로파일을 자동 선택 (`<프로파일>/IndexedDB/<오리진>`)
     - teams-for-linux: `~/.config/teams-for-linux/Partitions/teams-4-linux`
     - PWA: `~/.config/{microsoft-edge,google-chrome,chromium}/{Default,Profile N}`
     - snap·flatpak 설치도 같은 구조로 탐색 (`~/snap/<앱>/current/.config/...`, `~/.var/app/<app-id>/config/...`)
   - 그 외 OS: 기본 경로 없음. `TEAMS_MCP_DB` 로만 지정 가능.
+  - `<오리진>` 은 `https_teams.cloud.microsoft_0.indexeddb.leveldb` 또는 `https_teams.microsoft.com_0.indexeddb.leveldb`. MS가 오리진을 이전하는 중이라 둘이 공존할 수 있어(한쪽은 마이그레이션 후 버려진 stale), **최근에 쓰인 쪽을 자동 선택**한다. 프로파일이 여러 개인 리눅스도 같은 기준으로 고른다.
 - `TEAMS_MCP_HTTP_ADDR` — HTTP 바인드 주소 (기본 `127.0.0.1:8787`).
 - `TEAMS_MCP_TOKEN` — 설정 시 HTTP `Authorization: Bearer <token>` 필수.
