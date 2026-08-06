@@ -29,10 +29,14 @@ use crate::v8::V8Reader;
 const CONV_MANAGER: &str = "conversation-manager";
 /// 메시지 DB 를 식별하는 database 이름 세그먼트(`Teams:replychain-manager:...`).
 const MSG_MANAGER: &str = "replychain-manager";
+/// 사람 프로필 DB 를 식별하는 database 이름 세그먼트(`Teams:profiles:...`).
+const PROFILE_MANAGER: &str = "profiles";
 /// 대화 레코드가 담긴 object store 이름.
 const CONV_STORE_NAME: &str = "conversations";
 /// 메시지(replychain) 레코드가 담긴 object store 이름들.
 const MSG_STORE_NAMES: [&str; 2] = ["replychains", "replychains-2"];
+/// 사람 프로필 레코드가 담긴 object store 이름.
+const PROFILE_STORE_NAME: &str = "profiles";
 
 /// database 이름 목록에서 콜론 구분 세그먼트가 `manager` 와 정확히 일치하는 db id 를 찾는다.
 /// (예: `conversation-manager` 는 `conversation-folder-manager` 와 구분됨)
@@ -59,6 +63,19 @@ pub struct Message {
     /// 실제 바이트는 원격이라 여기엔 URL·크기만 담고, 조회는 `fetch_image` 도구로 한다. 없으면 생략.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ImageRef>,
+    /// 이 메시지에 달린 리액션. 없으면 생략.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<Reaction>,
+}
+
+/// 메시지에 달린 리액션 한 종류와 그걸 누른 사람들.
+#[derive(Debug, Clone, Serialize)]
+pub struct Reaction {
+    /// 리액션 종류. 유니코드 이모지는 실제 문자(🎉), 커스텀 이모지는 이름(`nepp`).
+    pub key: String,
+    /// 누른 사람. 표시이름으로 해석되며, 캐시에 프로필도 발언 기록도 없는 사람은
+    /// 원본 mri(`8:orgid:<UUID>`)가 그대로 남는다.
+    pub users: Vec<String>,
 }
 
 /// 메시지 본문의 AMS(Async Media Service) 이미지 참조. `url` 로 `fetch_image` 호출.
@@ -153,6 +170,7 @@ impl TeamsStore {
 
         let conv_db = find_db_by_manager(&databases, CONV_MANAGER);
         let msg_db = find_db_by_manager(&databases, MSG_MANAGER);
+        let profile_db = find_db_by_manager(&databases, PROFILE_MANAGER);
 
         // 이름으로 대상 (db, store) 셀 확정.
         let conv_cell: Option<(u64, u64)> = conv_db.and_then(|db| {
@@ -169,9 +187,17 @@ impl TeamsStore {
                 .collect(),
             None => Vec::new(),
         };
+        let profile_cell: Option<(u64, u64)> = profile_db.and_then(|db| {
+            store_names
+                .iter()
+                .find(|((d, _), name)| *d == db && name.as_str() == PROFILE_STORE_NAME)
+                .map(|((d, s), _)| (*d, *s))
+        });
 
         let mut messages_by_conv: HashMap<String, Vec<Message>> = HashMap::new();
         let mut topic_by_conv: HashMap<String, String> = HashMap::new();
+        // 리액션은 사람을 mri 로만 가리키므로 표시이름 대응표가 필요하다.
+        let mut name_by_mri: HashMap<String, String> = HashMap::new();
 
         // 2) object-store-data 레코드를 대상 셀에 한해 디코드.
         for (key, value) in &records {
@@ -184,12 +210,35 @@ impl TeamsStore {
             let cell = (kp.database_id, kp.object_store_id);
             if msg_cells.contains(&cell) {
                 if let Some(v) = V8Reader::decode(value) {
-                    collect_messages(&v, &mut messages_by_conv);
+                    collect_messages(&v, &mut messages_by_conv, &mut name_by_mri);
                 }
             } else if conv_cell == Some(cell) {
                 if let Some(v) = V8Reader::decode(value) {
                     if let Some((cid, topic)) = extract_topic(&v) {
                         topic_by_conv.insert(cid, topic);
+                    }
+                }
+            } else if profile_cell == Some(cell) {
+                if let Some(v) = V8Reader::decode(value) {
+                    if let (Some(mri), Some(name)) = (
+                        v.get("mri").and_then(Value::as_str),
+                        v.get("displayName").and_then(Value::as_str),
+                    ) {
+                        // 프로필이 정본이므로 발신자 역매핑보다 우선한다.
+                        name_by_mri.insert(mri.to_string(), name.to_string());
+                    }
+                }
+            }
+        }
+
+        // 3) 리액션의 mri 를 표시이름으로 치환 (대응표가 다 모인 뒤에 한 번에).
+        for msgs in messages_by_conv.values_mut() {
+            for m in msgs {
+                for r in &mut m.reactions {
+                    for u in &mut r.users {
+                        if let Some(name) = name_by_mri.get(u.as_str()) {
+                            *u = name.clone();
+                        }
                     }
                 }
             }
@@ -287,7 +336,13 @@ impl TeamsStore {
 }
 
 /// replychain 레코드에서 messageMap 을 순회해 메시지를 수집.
-fn collect_messages(record: &Value, out: &mut HashMap<String, Vec<Message>>) {
+/// 겸사겸사 발신자(`creator` mri → `imDisplayName`)를 모아 리액션 이름 해석에 쓴다 —
+/// 프로필 store 에 없는 사람도 이쪽에 있으면 이름이 붙는다.
+fn collect_messages(
+    record: &Value,
+    out: &mut HashMap<String, Vec<Message>>,
+    name_by_mri: &mut HashMap<String, String>,
+) {
     let Some(map) = record.get("messageMap").and_then(Value::as_object) else {
         return;
     };
@@ -297,6 +352,16 @@ fn collect_messages(record: &Value, out: &mut HashMap<String, Vec<Message>>) {
         .unwrap_or("")
         .to_string();
     for msg in map.values() {
+        if let (Some(mri), Some(name)) = (
+            msg.get("creator").and_then(Value::as_str),
+            msg.get("imDisplayName")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty()),
+        ) {
+            name_by_mri
+                .entry(mri.to_string())
+                .or_insert_with(|| name.to_string());
+        }
         if let Some(m) = parse_message(msg, &conv_fallback) {
             out.entry(m.conversation_id.clone()).or_default().push(m);
         }
@@ -335,6 +400,7 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
         .or_else(|| num_field(obj, "clientArrivalTime"))
         .unwrap_or(0);
     let id = str_field(obj, "id").unwrap_or_default();
+    let reactions = extract_reactions(obj.get("properties"));
 
     Some(Message {
         conversation_id,
@@ -346,7 +412,59 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
         id,
         reply_to,
         images,
+        reactions,
     })
+}
+
+/// `properties.emotions` 에서 리액션을 뽑는다. 원본 형태는
+/// `[{ key, users: [{ mri, time, value }] }]` 이며, 여기서는 key 를 사람이 읽을 수 있게
+/// 정규화하고 users 는 mri 만 남긴다(표시이름 치환은 대응표가 모인 뒤 build_cache 에서).
+/// `deltaEmotions` 는 같은 내용의 증분이라 쓰지 않는다.
+fn extract_reactions(properties: Option<&Value>) -> Vec<Reaction> {
+    let Some(list) = properties
+        .and_then(|p| p.get("emotions"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|e| {
+            let key = e.get("key").and_then(Value::as_str)?;
+            let users: Vec<String> = e
+                .get("users")
+                .and_then(Value::as_array)
+                .map(|us| {
+                    us.iter()
+                        .filter_map(|u| u.get("mri").and_then(Value::as_str))
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if users.is_empty() {
+                return None; // 아무도 안 누른 종류는 버린다(취소된 리액션의 잔재)
+            }
+            Some(Reaction {
+                key: normalize_reaction_key(key),
+                users,
+            })
+        })
+        .collect()
+}
+
+/// 리액션 key 정규화.
+/// - 커스텀(테넌트) 이모지는 `nepp;0-ckr-d1-<해시>` 형태라 `;` 앞의 이름만 남긴다.
+/// - 유니코드 이모지는 `1f389_partypopper` 처럼 코드포인트가 앞에 붙어 있어 실제 문자(🎉)로 바꾼다.
+/// - `like`, `heart` 처럼 이름뿐인 것은 그대로 둔다.
+fn normalize_reaction_key(key: &str) -> String {
+    let base = key.split(';').next().unwrap_or(key);
+    if let Some((hex, _)) = base.split_once('_') {
+        if (4..=6).contains(&hex.len()) && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            if let Some(ch) = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32) {
+                return ch.to_string();
+            }
+        }
+    }
+    base.to_string()
 }
 
 /// content HTML 에서 AMS 이미지(`<img itemtype=".../AMSImage" src=... style="width:..;height:..">`)를

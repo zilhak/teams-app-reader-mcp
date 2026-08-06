@@ -79,7 +79,7 @@ impl TeamsServer {
     }
 
     #[tool(
-        description = "특정 Teams 대화의 캐시된 메시지를 시간 오름차순으로 반환한다. chat 은 conversationId 정확일치 또는 대화명 부분일치. 각 메시지: 발신자, 본문(HTML은 평문화), 시각(UTC), 메시지타입. 이미지가 있으면 images[]{url,width,height} 로 함께 반환하며, 실제 이미지는 그 url 을 fetch_image 에 넘겨 조회한다. 읽기 전용."
+        description = "특정 Teams 대화의 캐시된 메시지를 시간 오름차순으로 반환한다. chat 은 conversationId 정확일치 또는 대화명 부분일치. 각 메시지: 발신자, 본문(HTML은 평문화), 시각(UTC), 메시지타입. 이미지가 있으면 images[]{url,width,height} 로 함께 반환하며, 실제 이미지는 그 url 을 fetch_image 에 넘겨 조회한다. 리액션이 달려 있으면 reactions[]{key,users} 로 누가 무슨 리액션을 눌렀는지 함께 반환한다(key 는 이모지 문자 또는 커스텀 이모지 이름, users 는 표시이름). 읽기 전용."
     )]
     async fn read_messages(
         &self,
