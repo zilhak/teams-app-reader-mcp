@@ -29,6 +29,7 @@ Microsoft Graph API·봇·토큰·앱 등록을 쓰지 않는다. Teams 앱이 �
 - ✅ **로컬 캐시에 이미 있는 메시지 읽기** (Teams가 자동 캐싱한 수개월치, 채팅별 수백~1600건).
 - ✅ **메시지 이미지 참조 노출 + 실물 조회** (`read_messages` 의 `images[]` → `fetch_image`). 상세: `docs/image-fetch.md`.
 - ✅ **리액션(누가 무슨 이모지를 눌렀는지) 노출** (`read_messages` 의 `reactions[]`). 캐시에 프로필도 발언 기록도 없는 사람은 이름이 안 붙고 원본 mri 가 남는다(실측 약 8%).
+- ✅ **원본 HTML 그대로 보기** (`read_messages(raw=true)` 의 `content_html`). 기본 응답의 `content` 는 평문화라 링크 URL·목록 계층·줄바꿈·코드블록·표가 사라진다(실측: `<a href>` 2,354개, `<li>` 9,780개가 텍스트만 남고 버려짐). 그게 필요할 때만 켠다 — 토큰이 3~5배 든다.
 - ✅ **붙여넣기용 리치 텍스트 클립보드 복사** (`copy_to_clipboard`) — 전송 미지원의 보완 경로.
 - ❌ 캐시에 없는 과거를 새로 수집하는 기능은 드롭됨 (`docs/scroll-collection/`).
 
@@ -53,7 +54,7 @@ cargo build --release -p teams-mcp-http    # → target/release/teams-mcp-http
 | 도구 | 설명 |
 |---|---|
 | `list_chats` | 캐시된 대화 목록(대화명·conversationId·메시지 수·마지막 메시지)을 최근순으로 |
-| `read_messages` | 특정 대화의 메시지(`chat`=conversationId 정확일치 또는 대화명 부분일치, `limit`, `before_ms`). 이미지가 있으면 `images[]{url,width,height}`, 리액션이 있으면 `reactions[]{key,users}` 포함 |
+| `read_messages` | 특정 대화의 메시지(`chat`=conversationId 정확일치 또는 대화명 부분일치, `limit`, `before_ms`, `raw`). 이미지가 있으면 `images[]{url,width,height}`, 리액션이 있으면 `reactions[]{key,users}`, `raw=true` 면 원본 HTML `content_html` 포함 |
 | `search_messages` | 캐시 전역 키워드 검색(`query`, `limit`) |
 | `fetch_image` | `images[].url`(AMS 이미지)을 인증 쿠키로 GET 해 이미지로 반환. **유일하게 네트워크 사용** |
 | `copy_to_clipboard` | `html` 을 클립보드에 올린다. Teams 입력창에 붙여넣으면 링크·불릿·강조가 살아난다. **유일하게 로컬 상태를 변경**(기존 클립보드 내용을 덮어씀) |

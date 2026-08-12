@@ -52,6 +52,12 @@ pub struct Message {
     pub conversation_id: String,
     pub sender: String,
     pub content: String,
+    /// 손대지 않은 원본 content HTML. 평문화(`content`)로 사라지는 링크 URL·목록 구조·
+    /// 줄바꿈·코드블록·표를 그대로 보려는 용도. 원본이 HTML 이 아니면(평문 `Text` 메시지)
+    /// `content` 와 같은 값이라 담지 않는다.
+    /// 캐시에는 항상 들고 있고, `read_messages(raw=true)` 로 요청했을 때만 응답에 실린다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_html: Option<String>,
     pub time: String, // "YYYY-MM-DD HH:MM:SS" UTC
     pub time_ms: i64,
     pub message_type: String,
@@ -66,6 +72,15 @@ pub struct Message {
     /// 이 메시지에 달린 리액션. 없으면 생략.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<Reaction>,
+}
+
+impl Message {
+    /// 원본 HTML 을 뺀 사본. raw 를 요청하지 않은 모든 응답 경로가 이걸 쓴다.
+    fn without_html(&self) -> Message {
+        let mut m = self.clone();
+        m.content_html = None;
+        m
+    }
 }
 
 /// 메시지에 달린 리액션 한 종류와 그걸 누른 사람들.
@@ -263,7 +278,7 @@ impl TeamsStore {
                 .messages_by_conv
                 .iter()
                 .map(|(cid, msgs)| {
-                    let last = msgs.last().cloned();
+                    let last = msgs.last().map(Message::without_html);
                     let topic = c
                         .topic_by_conv
                         .get(cid)
@@ -294,11 +309,13 @@ impl TeamsStore {
 
     /// 특정 대화의 메시지. `chat` 은 conversationId 정확일치 또는 topic 부분일치(대소문자 무시).
     /// 최근 `limit` 개, `before_ms` 지정 시 그 이전만. 시간 오름차순 반환.
+    /// `raw` 면 각 메시지에 원본 HTML(`content_html`)도 함께 실린다.
     pub fn read_messages(
         &self,
         chat: &str,
         limit: usize,
         before_ms: Option<i64>,
+        raw: bool,
     ) -> Result<Vec<Message>, StoreError> {
         self.with_cache(|c| {
             let Some(cid) = resolve_conversation(c, chat) else {
@@ -312,11 +329,15 @@ impl TeamsStore {
                 .filter(|m| before_ms.map_or(true, |b| m.time_ms < b))
                 .collect();
             let start = filtered.len().saturating_sub(limit);
-            filtered[start..].iter().map(|m| (*m).clone()).collect()
+            filtered[start..]
+                .iter()
+                .map(|m| if raw { (*m).clone() } else { m.without_html() })
+                .collect()
         })
     }
 
     /// 캐시 전역 키워드 검색(대소문자 무시, content/sender 대상). 최근 `limit` 개.
+    /// 여러 대화에 흩어진 결과라 원본 HTML 은 싣지 않는다(필요하면 read_messages 로).
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Message>, StoreError> {
         let q = query.to_lowercase();
         self.with_cache(|c| {
@@ -330,7 +351,7 @@ impl TeamsStore {
                 .collect();
             hits.sort_by_key(|m| m.time_ms);
             let start = hits.len().saturating_sub(limit);
-            hits[start..].iter().map(|m| (*m).clone()).collect()
+            hits[start..].iter().map(|m| m.without_html()).collect()
         })
     }
 }
@@ -382,6 +403,8 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
         .unwrap_or_default();
     let message_type = str_field(obj, "messageType").unwrap_or_default();
     let raw_content = str_field(obj, "content").unwrap_or_default();
+    // raw 조회용 원본은 아무 가공도 하기 전(답장 인용 포함) 상태로 보관한다.
+    let content_html = raw_content.contains('<').then(|| raw_content.clone());
     // 답장 인용(blockquote) 제거 + 대상 id 추출
     let (raw_content, reply_to) = strip_reply_quote(&raw_content);
     // 평문화 전에 이미지 참조를 뽑아 둔다 (html_to_text 가 <img> 를 통째로 버리기 때문).
@@ -406,6 +429,7 @@ fn parse_message(v: &Value, conv_fallback: &str) -> Option<Message> {
         conversation_id,
         sender,
         content,
+        content_html,
         time: format_epoch_ms(time_ms),
         time_ms,
         message_type,

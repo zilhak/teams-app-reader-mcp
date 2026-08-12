@@ -25,6 +25,9 @@ pub struct ReadMessagesArgs {
     pub limit: Option<usize>,
     /// 이 epoch(ms) 이전 메시지만 (과거 페이지네이션용, 선택).
     pub before_ms: Option<i64>,
+    /// true 면 각 메시지에 원본 HTML(`content_html`)도 함께 반환 (기본 false).
+    /// 평문 `content` 로는 사라지는 링크 URL·목록 구조·줄바꿈·코드블록·표를 봐야 할 때만 켠다.
+    pub raw: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -79,7 +82,7 @@ impl TeamsServer {
     }
 
     #[tool(
-        description = "특정 Teams 대화의 캐시된 메시지를 시간 오름차순으로 반환한다. chat 은 conversationId 정확일치 또는 대화명 부분일치. 각 메시지: 발신자, 본문(HTML은 평문화), 시각(UTC), 메시지타입. 이미지가 있으면 images[]{url,width,height} 로 함께 반환하며, 실제 이미지는 그 url 을 fetch_image 에 넘겨 조회한다. 리액션이 달려 있으면 reactions[]{key,users} 로 누가 무슨 리액션을 눌렀는지 함께 반환한다(key 는 이모지 문자 또는 커스텀 이모지 이름, users 는 표시이름). 읽기 전용."
+        description = "특정 Teams 대화의 캐시된 메시지를 시간 오름차순으로 반환한다. chat 은 conversationId 정확일치 또는 대화명 부분일치. 각 메시지: 발신자, 본문(HTML은 평문화), 시각(UTC), 메시지타입. 이미지가 있으면 images[]{url,width,height} 로 함께 반환하며, 실제 이미지는 그 url 을 fetch_image 에 넘겨 조회한다. 리액션이 달려 있으면 reactions[]{key,users} 로 누가 무슨 리액션을 눌렀는지 함께 반환한다(key 는 이모지 문자 또는 커스텀 이모지 이름, users 는 표시이름). raw=true 로 부르면 평문화 전 원본 HTML 을 content_html 로 함께 반환한다 — 평문에서는 사라지는 링크 URL·목록 계층·줄바꿈·코드블록·표를 그대로 봐야 할 때만 쓴다(토큰이 3~5배 든다). 읽기 전용."
     )]
     async fn read_messages(
         &self,
@@ -87,8 +90,9 @@ impl TeamsServer {
     ) -> Result<CallToolResult, McpError> {
         let store = self.store.clone();
         let limit = args.limit.unwrap_or(30);
+        let raw = args.raw.unwrap_or(false);
         let msgs = tokio::task::spawn_blocking(move || {
-            store.read_messages(&args.chat, limit, args.before_ms)
+            store.read_messages(&args.chat, limit, args.before_ms, raw)
         })
         .await
         .map_err(join_err)?

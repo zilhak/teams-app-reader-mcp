@@ -14,7 +14,7 @@ fn main() {
 
     // topic 부분일치로 읽기
     println!("\n=== 'TechTalk' 부분일치 최근 3개 ===");
-    for m in store.read_messages("TechTalk", 3, None).unwrap() {
+    for m in store.read_messages("TechTalk", 3, None, false).unwrap() {
         let c: String = m.content.chars().take(70).collect();
         println!("{} | {}: {}", m.time, m.sender, c);
     }
@@ -27,7 +27,9 @@ fn main() {
 
     if let Some(top) = chats.first() {
         println!("\n=== '{}' 최근 5개 ===", top.topic);
-        let msgs = store.read_messages(&top.conversation_id, 5, None).unwrap();
+        let msgs = store
+            .read_messages(&top.conversation_id, 5, None, false)
+            .unwrap();
         for m in &msgs {
             let c: String = m.content.chars().take(80).collect();
             println!("{} | {}: {}", m.time, m.sender, c);
